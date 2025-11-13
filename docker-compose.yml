@@ -1,0 +1,21 @@
+version: '3.8'
+services:
+  code-assist-mcp:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app  # Monte ton repo Git pour accès fichiers
+    environment:
+      - PYTHONPATH=/app
+
+  ollama:  # Optionnel : Pour LLM local dans outils
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    command: serve
+
+volumes:
+  ollama:
