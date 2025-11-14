@@ -1,7 +1,17 @@
+# Dockerfile
 FROM python:3.12-slim
+
 WORKDIR /app
+
+# Dépendances système
+RUN apt-get update && apt-get install -y git curl && rm -rf /var/lib/apt/lists/*
+
+# Copie des fichiers
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
 COPY server.py .
+
 EXPOSE 8080
+
 CMD ["python", "server.py"]

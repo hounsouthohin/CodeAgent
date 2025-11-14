@@ -1,179 +1,380 @@
 import os
+import json
+import requests
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict
 from fastmcp import FastMCP
 import git
-import black
-import flake8.api.legacy as flake8
-from pylint.lint import Run  # Correct pour pylint 3.x
 
+# === Configuration FastMCP ===
 mcp = FastMCP(name="CodeAssistMCP")
 
-# ------------------------------------------------------------------ #
-# OUTILS (avec @mcp.tool())
-# ------------------------------------------------------------------ #
+# Configuration Ollama avec modèle optimisé
+OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://ollama:11434")
+OLLAMA_URL = f"{OLLAMA_BASE_URL}/api/generate"
+MODEL = "qwen2.5-coder:1.5b"  # ← Modèle rapide et optimisé pour le code
+
+def ask_ollama(prompt: str, max_tokens: int = 2000, timeout: int = 60) -> str:
+    """
+    Appel à Ollama avec streaming pour éviter les timeouts.
+    
+    Args:
+        prompt: Le prompt à envoyer
+        max_tokens: Nombre maximum de tokens à générer
+        timeout: Timeout en secondes (par chunk, pas total)
+    """
+    try:
+        # Vérification santé Ollama
+        health_check = requests.get(
+            f"{OLLAMA_BASE_URL}/api/tags", 
+            timeout=5
+        )
+        health_check.raise_for_status()
+        
+        # Requête avec streaming
+        response = requests.post(
+            OLLAMA_URL,
+            json={
+                "model": MODEL,
+                "prompt": prompt,
+                "stream": True,  # ← Streaming activé
+                "options": {
+                    "temperature": 0.2,
+                    "num_predict": max_tokens,
+                    "top_p": 0.9
+                }
+            },
+            stream=True,
+            timeout=timeout
+        )
+        response.raise_for_status()
+        
+        # Collecter la réponse en streaming
+        full_response = ""
+        for line in response.iter_lines():
+            if line:
+                try:
+                    chunk = json.loads(line)
+                    full_response += chunk.get("response", "")
+                    
+                    # Arrêter si la génération est terminée
+                    if chunk.get("done", False):
+                        break
+                except json.JSONDecodeError:
+                    continue
+        
+        return full_response.strip() or "Pas de réponse générée"
+        
+    except requests.exceptions.ConnectionError:
+        return "❌ Impossible de se connecter à Ollama. Le service est-il démarré ?"
+    except requests.exceptions.Timeout:
+        return f"⏱️ Timeout après {timeout}s. Le modèle prend trop de temps."
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            return f"❌ Modèle '{MODEL}' non trouvé. Installez-le : docker-compose exec ollama ollama pull {MODEL}"
+        return f"❌ Erreur HTTP {e.response.status_code}: {e}"
+    except Exception as e:
+        return f"❌ Erreur inattendue : {str(e)}"
+
+def clean_code_response(response: str) -> str:
+    """Nettoie la réponse pour extraire uniquement le code."""
+    # Supprimer les balises markdown si présentes
+    response = response.replace("```python", "").replace("```", "").strip()
+    return response
 
 @mcp.tool()
-def code_review(fichier: str, contexte: Optional[str] = None) -> Dict[str, str]:
-    """Revue complète d’un fichier Python."""
-    repo_path = Path(os.getcwd())
-    full_path = repo_path / fichier
-    if not full_path.exists():
-        return {"error": f"Fichier {fichier} non trouvé dans {repo_path}"}
+def analyze_and_fix(fichier: str) -> Dict:
+    """
+    Analyse et corrige automatiquement un fichier Python avec IA locale.
+    
+    Args:
+        fichier: Nom du fichier à analyser (ex: "test.py")
+    
+    Returns:
+        Dict avec le statut, le code corrigé et le chemin de sauvegarde
+    """
+    path = Path("/app") / fichier
+    if not path.exists():
+        return {"error": f"Fichier '{fichier}' non trouvé dans /app"}
+    
+    try:
+        code = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return {"error": f"Impossible de lire le fichier : {e}"}
+    
+    # Limiter la taille du code pour éviter les timeouts
+    code_truncated = code[:5000] if len(code) > 5000 else code
+    
+    prompt = f"""Fix all bugs in this Python code. Return ONLY the corrected code, no explanations.
 
-    with open(full_path, 'r', encoding="utf-8") as f:
-        code = f.read()
+Fixes needed:
+- Syntax errors
+- Missing imports
+- Undefined variables
+- Logic errors
+- Indentation
 
-    style_report = _run_flake8(full_path)
-    pylint_report = _run_pylint(full_path)
+Code:
+```python
+{code_truncated}
+```
 
-    lines = code.split('\n')
-    complexity = len([l for l in lines if any(k in l for k in ('if', 'for', 'while'))])
-
-    # TOUT EN STRING
+Corrected code:"""
+    
+    fixed_code = ask_ollama(prompt, max_tokens=3000, timeout=90)
+    
+    # Nettoyer la réponse
+    fixed_code = clean_code_response(fixed_code)
+    
+    # Vérifier si c'est une erreur
+    if fixed_code.startswith("❌") or fixed_code.startswith("⏱️"):
+        return {
+            "fichier": str(path),
+            "status": "Échec",
+            "erreur": fixed_code
+        }
+    
+    # Créer une sauvegarde
+    backup_path = path.with_suffix(".py.bak")
+    if not backup_path.exists():
+        try:
+            backup_path.write_text(code, encoding="utf-8")
+        except Exception as e:
+            return {"error": f"Impossible de créer la sauvegarde : {e}"}
+    
+    # Écrire le code corrigé
+    try:
+        path.write_text(fixed_code, encoding="utf-8")
+    except Exception as e:
+        return {"error": f"Impossible d'écrire le fichier corrigé : {e}"}
+    
     return {
-        "fichier": str(full_path),
-        "lignes": str(len(lines)),
-        "complexite_estimee": str(complexity),
-        "style_issues": style_report,
-        "pylint_score": str(pylint_report.get('score', 'N/A')),
-        "suggestions": f"Réduisez la complexité ({complexity} branches).",
-        "contexte": contexte or "Revue générale"
+        "fichier": str(path),
+        "status": "✅ Corrigé par IA",
+        "lignes_avant": len(code.splitlines()),
+        "lignes_après": len(fixed_code.splitlines()),
+        "sauvegarde": str(backup_path),
+        "code_corrigé": fixed_code[:500] + "..." if len(fixed_code) > 500 else fixed_code
     }
 
-@mcp.tool()  # Correct
-def code_critique_et_suggestions(fichier: str, focus: str = "performance") -> List[Dict[str, str]]:
-    """Critiques ciblées."""
-    repo_path = Path(os.getcwd())
-    full_path = repo_path / fichier
-    if not full_path.exists():
-        return [{"error": f"Fichier {fichier} non trouvé."}]
-
-    with open(full_path, 'r', encoding="utf-8") as f:
-        code = f.read()
-
-    critiques = []
-    if focus == "performance":
-        critiques.append({
-            "critique": "Boucles imbriquées détectées.",
-            "suggestion": "Utilisez dict/set pour O(1) lookups."
-        })
-    elif focus == "lisibilité":
-        critiques.append({
-            "critique": "Fonctions trop longues.",
-            "suggestion": "Découpez en sous-fonctions."
-        })
-
+@mcp.tool()
+def generate_tests(fichier: str) -> Dict:
+    """
+    Génère des tests unitaires complets avec pytest.
+    
+    Args:
+        fichier: Nom du fichier à tester (ex: "main.py")
+    
+    Returns:
+        Dict avec le chemin du fichier de tests et le contenu
+    """
+    path = Path("/app") / fichier
+    if not path.exists():
+        return {"error": f"Fichier '{fichier}' non trouvé"}
+    
     try:
-        formatted = black.format_str(code, mode=black.FileMode())
-        diff = "\n".join([l for l in formatted.splitlines()[:5] if l not in code.splitlines()[:5]])
-        critiques.append({
-            "critique": "Code non formaté Black.",
-            "suggestion": f"Appliquez Black → {diff}"
-        })
-    except:
-        pass
+        code = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return {"error": f"Impossible de lire le fichier : {e}"}
+    
+    code_truncated = code[:4000] if len(code) > 4000 else code
+    
+    prompt = f"""Generate pytest unit tests for this code. Return ONLY the test code.
 
-    return critiques
+Requirements:
+- Use pytest fixtures
+- Test normal cases
+- Test edge cases
+- Test error handling
+- Use descriptive test names
 
-@mcp.tool()  # Correct
-def prepare_push_github(message_commit: str, branche: str = "main") -> Dict[str, str]:
-    """Génère script bash pour push."""
-    try:
-        repo = git.Repo(os.getcwd())
-        status = repo.git.status('--porcelain')
-        if not status.strip():
-            return {"error": "Aucun changement."}
+Code to test:
+```python
+{code_truncated}
+```
 
-        script = f"""#!/bin/bash
-git add .
-git commit -m "{message_commit}"
-git push origin {branche}
-"""
+Test code:"""
+    
+    tests = ask_ollama(prompt, max_tokens=2500, timeout=90)
+    tests = clean_code_response(tests)
+    
+    if tests.startswith("❌") or tests.startswith("⏱️"):
         return {
-            "stage": "git add .",
-            "commit": f'git commit -m "{message_commit}"',
-            "push": f"git push origin {branche}",
-            "full_script": script,
-            "status_actuel": status
+            "status": "Échec",
+            "erreur": tests
+        }
+    
+    test_file = path.parent / f"test_{path.name}"
+    
+    try:
+        test_file.write_text(tests, encoding="utf-8")
+    except Exception as e:
+        return {"error": f"Impossible d'écrire les tests : {e}"}
+    
+    return {
+        "test_file": str(test_file),
+        "status": "✅ Tests générés",
+        "nombre_lignes": len(tests.splitlines()),
+        "tests": tests[:500] + "..." if len(tests) > 500 else tests
+    }
+
+@mcp.tool()
+def expert_review(fichier: str) -> Dict:
+    """
+    Analyse experte rapide : bugs, style, performance, sécurité.
+    
+    Args:
+        fichier: Nom du fichier à analyser
+    
+    Returns:
+        Dict avec l'analyse complète
+    """
+    path = Path("/app") / fichier
+    if not path.exists():
+        return {"error": f"Fichier '{fichier}' non trouvé"}
+    
+    try:
+        code = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return {"error": f"Impossible de lire le fichier : {e}"}
+    
+    # Limiter pour analyse rapide
+    code_truncated = code[:3000] if len(code) > 3000 else code
+    
+    prompt = f"""Code review - Be concise:
+
+1. Critical bugs?
+2. Security issues?
+3. Style problems?
+4. Top 3 improvements?
+
+Code:
+```python
+{code_truncated}
+```
+
+Review:"""
+    
+    analysis = ask_ollama(prompt, max_tokens=1500, timeout=60)
+    
+    return {
+        "fichier": str(path),
+        "analyse": analysis,
+        "lignes_analysées": len(code.splitlines()),
+        "taille_fichier": f"{len(code)} caractères",
+        "status": "✅ Analyse terminée" if not analysis.startswith("❌") else "❌ Échec"
+    }
+
+@mcp.tool()
+def quick_explain(fichier: str) -> Dict:
+    """
+    Explication rapide et concise de ce que fait le code.
+    
+    Args:
+        fichier: Nom du fichier à expliquer
+    
+    Returns:
+        Dict avec l'explication
+    """
+    path = Path("/app") / fichier
+    if not path.exists():
+        return {"error": f"Fichier '{fichier}' non trouvé"}
+    
+    try:
+        code = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return {"error": f"Impossible de lire le fichier : {e}"}
+    
+    code_truncated = code[:2000] if len(code) > 2000 else code
+    
+    prompt = f"""Explain this code in 3-4 sentences. What does it do?
+
+```python
+{code_truncated}
+```
+
+Explanation:"""
+    
+    explanation = ask_ollama(prompt, max_tokens=500, timeout=30)
+    
+    return {
+        "fichier": str(path),
+        "explication": explanation,
+        "status": "✅ Explication générée"
+    }
+
+@mcp.tool()
+def safe_push_github(message: str, branche: str = "main") -> Dict:
+    """
+    Vérifie que le repo est propre et génère un script push sécurisé.
+    
+    Args:
+        message: Message de commit
+        branche: Branche cible (défaut: main)
+    
+    Returns:
+        Dict avec le script de push ou une erreur
+    """
+    try:
+        repo = git.Repo("/app")
+        
+        if repo.is_dirty(untracked_files=True):
+            return {
+                "error": "❌ Repository sale. Nettoyez d'abord avec black/ruff.",
+                "fichiers_modifiés": [item.a_path for item in repo.index.diff(None)],
+                "fichiers_non_trackés": repo.untracked_files
+            }
+        
+        script = f"""#!/bin/bash
+# Script de push sécurisé généré automatiquement
+cd /app
+git add .
+git commit -m "{message}"
+git push origin {branche}
+echo "✅ Push réussi sur {branche}"
+"""
+        
+        return {
+            "status": "✅ Prêt à push",
+            "script": script,
+            "message": message,
+            "branche": branche,
+            "instruction": "Copiez le script et exécutez-le manuellement"
         }
     except git.InvalidGitRepositoryError:
-        return {"error": "Pas un repo Git. Exécutez `git init`."}
-
-@mcp.tool()  # Correct
-def lint_et_format(fichier: Optional[str] = None) -> Dict[str, str]:
-    repo_path = Path(os.getcwd())
-    target = repo_path / fichier if fichier else repo_path
-
-    if target.is_file():
-        original = target.read_text(encoding="utf-8")
-        try:
-            formatted = black.format_str(original, mode=black.FileMode())
-            diff = "\n".join([l for l in formatted.splitlines()[:10] if l not in original.splitlines()[:10]])
-        except:
-            diff = "Erreur formatting."
-    else:
-        diff = "Exécutez `black .` localement."
-
-    report = _run_flake8(target)
-    return {"diff_formatting": diff, "lint_report": report}
-
-# ------------------------------------------------------------------ #
-# PROMPTS (avec @mcp.prompt())
-# ------------------------------------------------------------------ #
-
-@mcp.prompt()  # Correct
-def revue_code_complete(fichier: str) -> str:
-    """Workflow complet de revue."""
-    pass
-
-@mcp.prompt()  # Correct
-def deploy_propre(message: str) -> str:
-    """Nettoie + push."""
-    pass
-
-# ------------------------------------------------------------------ #
-# HELPERS
-# ------------------------------------------------------------------ #
-
-def _run_flake8(path: Path) -> str:
-    style_guide = flake8.get_style_guide(ignore=['E501'])
-    report = style_guide.check_files([str(path)])
-    return f"{report.total_errors} erreurs Flake8."
-
-def _run_pylint(path: Path) -> Dict[str, any]:
-    """Exécute pylint sans bloquer le processus."""
-    from io import StringIO
-    import sys
-    from pylint.lint import Run
-    from pylint.reporters.text import TextReporter
-
-    # Redirige la sortie
-    old_stdout = sys.stdout
-    sys.stdout = mystdout = StringIO()
-
-    try:
-        # Run sans do_exit → il ne quitte pas le programme
-        Run([str(path), '--output-format=text'], reporter=TextReporter(mystdout), exit=False)
-        output = mystdout.getvalue()
-        
-        # Extraire le score (ex: "Your code has been rated at 9.50/10")
-        score_line = [line for line in output.splitlines() if "rated at" in line]
-        score = score_line[0].split("at")[1].split("/")[0].strip() if score_line else "N/A"
-        
+        return {"error": "❌ Ce n'est pas un repository Git"}
     except Exception as e:
-        output = f"Erreur pylint: {e}"
-        score = "N/A"
-    finally:
-        sys.stdout = old_stdout
+        return {"error": f"❌ Erreur Git : {e}"}
 
-    return {
-        "score": f"{score}/10",
-        "output": output[:600] + ("..." if len(output) > 600 else "")
-    }
-# ------------------------------------------------------------------ #
-# LANCEMENT
-# ------------------------------------------------------------------ #
+@mcp.tool()
+def list_files(pattern: str = "*.py") -> Dict:
+    """
+    Liste les fichiers Python dans /app.
+    
+    Args:
+        pattern: Pattern de recherche (défaut: *.py)
+    
+    Returns:
+        Dict avec la liste des fichiers
+    """
+    app_path = Path("/app")
+    
+    try:
+        files = list(app_path.glob(pattern))
+        files = [f for f in files if f.is_file() and not f.name.startswith('.')]
+        
+        return {
+            "status": "✅ Fichiers trouvés",
+            "nombre": len(files),
+            "fichiers": [f.name for f in sorted(files)],
+            "chemin": str(app_path)
+        }
+    except Exception as e:
+        return {"error": f"❌ Erreur : {e}"}
 
 if __name__ == "__main__":
-    mcp.run(transport="http", port=8080)
+    print(f"🚀 Démarrage du serveur MCP optimisé")
+    print(f"   Modèle: {MODEL}")
+    print(f"   URL Ollama: {OLLAMA_BASE_URL}")
+    print(f"   Port: 8080")
+    mcp.run(transport="http", port=8080, host="0.0.0.0")

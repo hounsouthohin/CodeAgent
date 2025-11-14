@@ -1,0 +1,18 @@
+def add(a, b)
+    return a + b
+
+
+x = 1
+y = 2
+result = add(x, y)
+print(f"The result is {result}")
+
+
+def subtract(a, b)
+    return a - b
+
+
+z = 5
+w = 3
+result = subtract(z, w
+print(f"The result is result}")

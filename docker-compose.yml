@@ -1,21 +1,35 @@
 version: '3.8'
+
 services:
   code-assist-mcp:
     build: .
     ports:
       - "8080:8080"
     volumes:
-      - .:/app  # Monte ton repo Git pour accès fichiers
+      - .:/app
     environment:
       - PYTHONPATH=/app
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    networks:
+      - mcp-network
 
-  ollama:  # Optionnel : Pour LLM local dans outils
-    image: ollama/ollama
+  ollama:
+    image: ollama/ollama:latest
     ports:
       - "11434:11434"
     volumes:
-      - ollama:/root/.ollama
-    command: serve
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - mcp-network
 
 volumes:
-  ollama:
+  ollama_data:
+    driver: local
+
+networks:
+  mcp-network:
+    driver: bridge

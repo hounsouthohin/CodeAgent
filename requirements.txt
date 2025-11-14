@@ -1,6 +1,11 @@
-fastmcp==0.1.0  # Framework MCP
-gitpython==3.1.43  # Pour interagir avec Git
-black==24.4.2  # Auto-formatting
-flake8==7.0.0  # Linting pour critiques
-pylint==3.2.2  # Analyse statique avancée
-pathspec==0.12.1  # Pour matcher fichiers
+# FastMCP - Serveur MCP
+fastmcp>=0.1.0
+
+# Ollama client
+requests>=2.31.0
+
+# Git pour safe_push_github
+GitPython>=3.1.40
+
+# Optionnel mais recommandé pour performance
+httpx>=0.25.0  # Alternative à requests, plus rapide
