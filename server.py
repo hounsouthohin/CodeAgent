@@ -4,7 +4,6 @@ import requests
 from pathlib import Path
 from typing import Dict
 from fastmcp import FastMCP
-import git
 
 # === Configuration FastMCP ===
 mcp = FastMCP(name="CodeAssistMCP")
@@ -302,49 +301,6 @@ Explanation:"""
         "explication": explanation,
         "status": "✅ Explication générée"
     }
-
-@mcp.tool()
-def safe_push_github(message: str, branche: str = "main") -> Dict:
-    """
-    Vérifie que le repo est propre et génère un script push sécurisé.
-    
-    Args:
-        message: Message de commit
-        branche: Branche cible (défaut: main)
-    
-    Returns:
-        Dict avec le script de push ou une erreur
-    """
-    try:
-        repo = git.Repo("/app")
-        
-        if repo.is_dirty(untracked_files=True):
-            return {
-                "error": "❌ Repository sale. Nettoyez d'abord avec black/ruff.",
-                "fichiers_modifiés": [item.a_path for item in repo.index.diff(None)],
-                "fichiers_non_trackés": repo.untracked_files
-            }
-        
-        script = f"""#!/bin/bash
-# Script de push sécurisé généré automatiquement
-cd /app
-git add .
-git commit -m "{message}"
-git push origin {branche}
-echo "✅ Push réussi sur {branche}"
-"""
-        
-        return {
-            "status": "✅ Prêt à push",
-            "script": script,
-            "message": message,
-            "branche": branche,
-            "instruction": "Copiez le script et exécutez-le manuellement"
-        }
-    except git.InvalidGitRepositoryError:
-        return {"error": "❌ Ce n'est pas un repository Git"}
-    except Exception as e:
-        return {"error": f"❌ Erreur Git : {e}"}
 
 @mcp.tool()
 def list_files(pattern: str = "*.py") -> Dict:
