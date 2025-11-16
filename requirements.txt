@@ -1,11 +1,51 @@
-# FastMCP - Serveur MCP
+# Core MCP
 fastmcp>=0.1.0
-
-# Ollama client
 requests>=2.31.0
 
-# Git pour safe_push_github
+# Code Analysis & Quality
+astroid>=3.0.0           # AST avancé
+radon>=6.0.0             # Complexité de code
+vulture>=2.10            # Code mort
+bandit>=1.7.5            # Sécurité
+pyflakes>=3.1.0          # Erreurs rapides
+pylint>=3.0.0            # Linting complet
+ruff>=0.1.0              # Linter ultra-rapide (remplace flake8, isort, etc.)
+
+# Type Checking
+mypy>=1.7.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-timeout>=2.2.0
+
+# Code Execution
+RestrictedPython>=7.0    # Sandboxing
+
+# Documentation & Search
+duckduckgo-search>=4.0.0 # Recherche web gratuite
+beautifulsoup4>=4.12.0   # HTML parsing
+lxml>=4.9.0              # XML parsing rapide
+requests-cache>=1.1.0    # Cache HTTP
+
+# Git Operations
 GitPython>=3.1.40
 
-# Optionnel mais recommandé pour performance
-httpx>=0.25.0  # Alternative à requests, plus rapide
+# Performance & Profiling
+py-spy>=0.3.14           # Profiler
+memory-profiler>=0.61.0  # Mémoire
+
+# Caching
+diskcache>=5.6.0         # Cache disque
+cachetools>=5.3.0        # Cache mémoire
+
+# Structured Output (pour LLM)
+pydantic>=2.5.0          # Validation de données
+
+# Utilities
+python-dotenv>=1.0.0     # Variables d'environnement
+rich>=13.7.0             # Logging coloré
+tenacity>=8.2.0          # Retry avec backoff
+
+# Optional: Advanced AI features
+# guidance>=0.1.0        # Structured prompting (commenté car optionnel)

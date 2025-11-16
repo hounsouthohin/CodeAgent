@@ -1,90 +1,35 @@
-import os
-import json
-import requests
+"""
+Serveur MCP Code-Assist - Architecture Modulaire
+Point d'entrée principal de l'application.
+"""
+import sys
 from pathlib import Path
-from typing import Dict
-from fastmcp import FastMCP
 
-# === Configuration FastMCP ===
+# Ajouter le répertoire racine au PYTHONPATH
+sys.path.append('/app')
+
+from fastmcp import FastMCP
+from utils import Config, setup_logger
+from mcp_tools import (
+    analyze_and_fix,
+    analyze_and_fix_advanced,
+    expert_review,
+    expert_review_advanced,
+    generate_tests,
+    quick_explain,
+    list_files
+)
+
+# === Configuration ===
+logger = setup_logger(__name__)
 mcp = FastMCP(name="CodeAssistMCP")
 
-# Configuration Ollama avec modèle optimisé
-OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://ollama:11434")
-OLLAMA_URL = f"{OLLAMA_BASE_URL}/api/generate"
-MODEL = "qwen2.5-coder:1.5b"  # ← Modèle rapide et optimisé pour le code
-
-def ask_ollama(prompt: str, max_tokens: int = 2000, timeout: int = 60) -> str:
-    """
-    Appel à Ollama avec streaming pour éviter les timeouts.
-    
-    Args:
-        prompt: Le prompt à envoyer
-        max_tokens: Nombre maximum de tokens à générer
-        timeout: Timeout en secondes (par chunk, pas total)
-    """
-    try:
-        # Vérification santé Ollama
-        health_check = requests.get(
-            f"{OLLAMA_BASE_URL}/api/tags", 
-            timeout=5
-        )
-        health_check.raise_for_status()
-        
-        # Requête avec streaming
-        response = requests.post(
-            OLLAMA_URL,
-            json={
-                "model": MODEL,
-                "prompt": prompt,
-                "stream": True,  # ← Streaming activé
-                "options": {
-                    "temperature": 0.2,
-                    "num_predict": max_tokens,
-                    "top_p": 0.9
-                }
-            },
-            stream=True,
-            timeout=timeout
-        )
-        response.raise_for_status()
-        
-        # Collecter la réponse en streaming
-        full_response = ""
-        for line in response.iter_lines():
-            if line:
-                try:
-                    chunk = json.loads(line)
-                    full_response += chunk.get("response", "")
-                    
-                    # Arrêter si la génération est terminée
-                    if chunk.get("done", False):
-                        break
-                except json.JSONDecodeError:
-                    continue
-        
-        return full_response.strip() or "Pas de réponse générée"
-        
-    except requests.exceptions.ConnectionError:
-        return "❌ Impossible de se connecter à Ollama. Le service est-il démarré ?"
-    except requests.exceptions.Timeout:
-        return f"⏱️ Timeout après {timeout}s. Le modèle prend trop de temps."
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 404:
-            return f"❌ Modèle '{MODEL}' non trouvé. Installez-le : docker-compose exec ollama ollama pull {MODEL}"
-        return f"❌ Erreur HTTP {e.response.status_code}: {e}"
-    except Exception as e:
-        return f"❌ Erreur inattendue : {str(e)}"
-
-def clean_code_response(response: str) -> str:
-    """Nettoie la réponse pour extraire uniquement le code."""
-    # Supprimer les balises markdown si présentes
-    response = response.replace("```python", "").replace("```", "").strip()
-    return response
+# === Outils MCP ===
 
 @mcp.tool()
-def analyze_and_fix(fichier: str) -> Dict:
+def analyze_and_fix_tool(fichier: str) -> dict:
     """
-    Analyse et corrige automatiquement un fichier Python avec IA locale.
+    Analyse et corrige automatiquement un fichier Python (rapide).
     
     Args:
         fichier: Nom du fichier à analyser (ex: "test.py")
@@ -92,72 +37,55 @@ def analyze_and_fix(fichier: str) -> Dict:
     Returns:
         Dict avec le statut, le code corrigé et le chemin de sauvegarde
     """
-    path = Path("/app") / fichier
-    if not path.exists():
-        return {"error": f"Fichier '{fichier}' non trouvé dans /app"}
-    
-    try:
-        code = path.read_text(encoding="utf-8")
-    except Exception as e:
-        return {"error": f"Impossible de lire le fichier : {e}"}
-    
-    # Limiter la taille du code pour éviter les timeouts
-    code_truncated = code[:5000] if len(code) > 5000 else code
-    
-    prompt = f"""Fix all bugs in this Python code. Return ONLY the corrected code, no explanations.
-
-Fixes needed:
-- Syntax errors
-- Missing imports
-- Undefined variables
-- Logic errors
-- Indentation
-
-Code:
-```python
-{code_truncated}
-```
-
-Corrected code:"""
-    
-    fixed_code = ask_ollama(prompt, max_tokens=3000, timeout=90)
-    
-    # Nettoyer la réponse
-    fixed_code = clean_code_response(fixed_code)
-    
-    # Vérifier si c'est une erreur
-    if fixed_code.startswith("❌") or fixed_code.startswith("⏱️"):
-        return {
-            "fichier": str(path),
-            "status": "Échec",
-            "erreur": fixed_code
-        }
-    
-    # Créer une sauvegarde
-    backup_path = path.with_suffix(".py.bak")
-    if not backup_path.exists():
-        try:
-            backup_path.write_text(code, encoding="utf-8")
-        except Exception as e:
-            return {"error": f"Impossible de créer la sauvegarde : {e}"}
-    
-    # Écrire le code corrigé
-    try:
-        path.write_text(fixed_code, encoding="utf-8")
-    except Exception as e:
-        return {"error": f"Impossible d'écrire le fichier corrigé : {e}"}
-    
-    return {
-        "fichier": str(path),
-        "status": "✅ Corrigé par IA",
-        "lignes_avant": len(code.splitlines()),
-        "lignes_après": len(fixed_code.splitlines()),
-        "sauvegarde": str(backup_path),
-        "code_corrigé": fixed_code[:500] + "..." if len(fixed_code) > 500 else fixed_code
-    }
+    logger.info(f"analyze_and_fix called for: {fichier}")
+    return analyze_and_fix(fichier)
 
 @mcp.tool()
-def generate_tests(fichier: str) -> Dict:
+def analyze_and_fix_advanced_tool(fichier: str) -> dict:
+    """
+    Analyse et corrige avec vérification par outils (précis mais plus lent).
+    L'IA peut exécuter et tester le code pour garantir qu'il fonctionne!
+    
+    Args:
+        fichier: Nom du fichier à analyser (ex: "test.py")
+    
+    Returns:
+        Dict avec le statut, le code corrigé vérifié
+    """
+    logger.info(f"analyze_and_fix_advanced called for: {fichier}")
+    return analyze_and_fix_advanced(fichier)
+
+@mcp.tool()
+def expert_review_tool(fichier: str) -> dict:
+    """
+    Code review rapide: bugs, style, performance (rapide).
+    
+    Args:
+        fichier: Nom du fichier à analyser
+    
+    Returns:
+        Dict avec l'analyse complète
+    """
+    logger.info(f"expert_review called for: {fichier}")
+    return expert_review(fichier)
+
+@mcp.tool()
+def expert_review_advanced_tool(fichier: str) -> dict:
+    """
+    Code review approfondie avec analyse statique et tests (précis).
+    L'IA utilise des outils d'analyse avancée (radon, bandit, etc.)
+    
+    Args:
+        fichier: Nom du fichier à analyser
+    
+    Returns:
+        Dict avec l'analyse approfondie
+    """
+    logger.info(f"expert_review_advanced called for: {fichier}")
+    return expert_review_advanced(fichier)
+
+@mcp.tool()
+def generate_tests_tool(fichier: str) -> dict:
     """
     Génère des tests unitaires complets avec pytest.
     
@@ -167,105 +95,11 @@ def generate_tests(fichier: str) -> Dict:
     Returns:
         Dict avec le chemin du fichier de tests et le contenu
     """
-    path = Path("/app") / fichier
-    if not path.exists():
-        return {"error": f"Fichier '{fichier}' non trouvé"}
-    
-    try:
-        code = path.read_text(encoding="utf-8")
-    except Exception as e:
-        return {"error": f"Impossible de lire le fichier : {e}"}
-    
-    code_truncated = code[:4000] if len(code) > 4000 else code
-    
-    prompt = f"""Generate pytest unit tests for this code. Return ONLY the test code.
-
-Requirements:
-- Use pytest fixtures
-- Test normal cases
-- Test edge cases
-- Test error handling
-- Use descriptive test names
-
-Code to test:
-```python
-{code_truncated}
-```
-
-Test code:"""
-    
-    tests = ask_ollama(prompt, max_tokens=2500, timeout=90)
-    tests = clean_code_response(tests)
-    
-    if tests.startswith("❌") or tests.startswith("⏱️"):
-        return {
-            "status": "Échec",
-            "erreur": tests
-        }
-    
-    test_file = path.parent / f"test_{path.name}"
-    
-    try:
-        test_file.write_text(tests, encoding="utf-8")
-    except Exception as e:
-        return {"error": f"Impossible d'écrire les tests : {e}"}
-    
-    return {
-        "test_file": str(test_file),
-        "status": "✅ Tests générés",
-        "nombre_lignes": len(tests.splitlines()),
-        "tests": tests[:500] + "..." if len(tests) > 500 else tests
-    }
+    logger.info(f"generate_tests called for: {fichier}")
+    return generate_tests(fichier)
 
 @mcp.tool()
-def expert_review(fichier: str) -> Dict:
-    """
-    Analyse experte rapide : bugs, style, performance, sécurité.
-    
-    Args:
-        fichier: Nom du fichier à analyser
-    
-    Returns:
-        Dict avec l'analyse complète
-    """
-    path = Path("/app") / fichier
-    if not path.exists():
-        return {"error": f"Fichier '{fichier}' non trouvé"}
-    
-    try:
-        code = path.read_text(encoding="utf-8")
-    except Exception as e:
-        return {"error": f"Impossible de lire le fichier : {e}"}
-    
-    # Limiter pour analyse rapide
-    code_truncated = code[:3000] if len(code) > 3000 else code
-    
-    prompt = f"""Code review - Be concise:
-
-1. Critical bugs?
-2. Security issues?
-3. Style problems?
-4. Top 3 improvements?
-
-Code:
-```python
-{code_truncated}
-```
-
-Review:"""
-    
-    analysis = ask_ollama(prompt, max_tokens=1500, timeout=60)
-    
-    return {
-        "fichier": str(path),
-        "analyse": analysis,
-        "lignes_analysées": len(code.splitlines()),
-        "taille_fichier": f"{len(code)} caractères",
-        "status": "✅ Analyse terminée" if not analysis.startswith("❌") else "❌ Échec"
-    }
-
-@mcp.tool()
-def quick_explain(fichier: str) -> Dict:
+def quick_explain_tool(fichier: str) -> dict:
     """
     Explication rapide et concise de ce que fait le code.
     
@@ -275,37 +109,13 @@ def quick_explain(fichier: str) -> Dict:
     Returns:
         Dict avec l'explication
     """
-    path = Path("/app") / fichier
-    if not path.exists():
-        return {"error": f"Fichier '{fichier}' non trouvé"}
-    
-    try:
-        code = path.read_text(encoding="utf-8")
-    except Exception as e:
-        return {"error": f"Impossible de lire le fichier : {e}"}
-    
-    code_truncated = code[:2000] if len(code) > 2000 else code
-    
-    prompt = f"""Explain this code in 3-4 sentences. What does it do?
-
-```python
-{code_truncated}
-```
-
-Explanation:"""
-    
-    explanation = ask_ollama(prompt, max_tokens=500, timeout=30)
-    
-    return {
-        "fichier": str(path),
-        "explication": explanation,
-        "status": "✅ Explication générée"
-    }
+    logger.info(f"quick_explain called for: {fichier}")
+    return quick_explain(fichier)
 
 @mcp.tool()
-def list_files(pattern: str = "*.py") -> Dict:
+def list_files_tool(pattern: str = "*.py") -> dict:
     """
-    Liste les fichiers Python dans /app.
+    Liste les fichiers dans le projet.
     
     Args:
         pattern: Pattern de recherche (défaut: *.py)
@@ -313,24 +123,33 @@ def list_files(pattern: str = "*.py") -> Dict:
     Returns:
         Dict avec la liste des fichiers
     """
-    app_path = Path("/app")
-    
-    try:
-        files = list(app_path.glob(pattern))
-        files = [f for f in files if f.is_file() and not f.name.startswith('.')]
-        
-        return {
-            "status": "✅ Fichiers trouvés",
-            "nombre": len(files),
-            "fichiers": [f.name for f in sorted(files)],
-            "chemin": str(app_path)
-        }
-    except Exception as e:
-        return {"error": f"❌ Erreur : {e}"}
+    logger.info(f"list_files called with pattern: {pattern}")
+    return list_files(pattern)
+
+# === Démarrage ===
 
 if __name__ == "__main__":
-    print(f"🚀 Démarrage du serveur MCP optimisé")
-    print(f"   Modèle: {MODEL}")
-    print(f"   URL Ollama: {OLLAMA_BASE_URL}")
-    print(f"   Port: 8080")
+    logger.info("=" * 60)
+    logger.info("🚀 Démarrage du serveur MCP Code-Assist (Modulaire)")
+    logger.info("=" * 60)
+    logger.info(f"   Modèle Ollama: {Config.OLLAMA_MODEL}")
+    logger.info(f"   URL Ollama: {Config.OLLAMA_BASE_URL}")
+    logger.info(f"   Port MCP: 8080")
+    logger.info(f"   Cache activé: {Config.CACHE_ENABLED}")
+    logger.info(f"   Exécution code: {Config.CODE_EXECUTION_ENABLED}")
+    logger.info(f"   Recherche web: {Config.WEB_SEARCH_ENABLED}")
+    logger.info("=" * 60)
+    
+    # Lister les outils disponibles
+    from tools import AVAILABLE_TOOLS
+    logger.info(f"   Outils disponibles pour Ollama: {len(AVAILABLE_TOOLS)}")
+    for tool_class in AVAILABLE_TOOLS:
+        tool_def = tool_class.get_tool_definition()
+        logger.info(f"      - {tool_def['name']}")
+    
+    logger.info("=" * 60)
+    logger.info("✅ Serveur prêt!")
+    logger.info("=" * 60)
+    
+    # Démarrer le serveur MCP
     mcp.run(transport="http", port=8080, host="0.0.0.0")
