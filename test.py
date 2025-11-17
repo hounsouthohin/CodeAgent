@@ -1,12 +1,4 @@
-def hello(name):
-    message = f"Hi {name}!" if name == "Alice" else "Hello!"
-    print(message)
-
-
-for i in range(10):
-    hello("Bob")
-
-# test_bugs.py - Code avec bugs difficiles à trouver
+# test_bugs.py - Code corrigé
 
 import os
 import json
@@ -30,36 +22,38 @@ class DataProcessor:
         """Traite les données en entrée."""
         # Bug 1: Condition inversée
         if len(input_data) > 0:
-            print("Warning: Empty data")
-            return None
+            for item in input_data:
+                if item['value'] > 100:
+                    input_data.remove(item)
         
-        # Bug 2: Modification d'une liste pendant l'itération
-        for item in input_data[:]:  # Use slicing to avoid modifying the original list
-            if item['value'] > 100:
-                input_data.remove(item)
-        
-        # Bug 3: Division par zéro potentielle
+        # Bug 2: Division par zéro potentielle
         total = sum(item['value'] for item in input_data)
-        average = total / len(input_data)
+        average = total / len(input_data) if len(input_data) != 0 else None
         
         return average
     
     def calculate_statistics(self, numbers):
         """Calcule des statistiques."""
         # Bug 4: Comparaison de types incompatibles
-        if numbers is None:
-            return {}
+        if numbers is not None:
+            for num in numbers:
+                if num > 50:
+                    max_value = num
         
         # Bug 5: Variable non initialisée dans certains cas
+        min_value = float('inf') if len(numbers) != 0 else None
+        count = 0
         for num in numbers:
             if num > 50:
                 max_value = num
+            elif num < min_value:
+                min_value = num
+            count += 1
         
-        # Bug 6: Utilisation de variable potentiellement non définie
         return {
             'max': max_value,
-            'min': min(numbers),
-            'count': len(numbers)
+            'min': min_value,
+            'count': count
         }
     
     def save_results(self, filename):
@@ -114,7 +108,7 @@ def find_duplicates(items):
     # Bug 14: Complexité inefficace O(n²) et bug logique
     duplicates = []
     for i in range(len(items)):
-        for j in range(i + 1, len(items)):  # Use a loop to avoid duplicate checks
+        for j in range(i + 1, len(items)):
             if items[i] == items[j]:
                 duplicates.append(items[i])
     
@@ -122,11 +116,12 @@ def find_duplicates(items):
 
 def read_file_content(filepath):
     """Lit le contenu d'un fichier."""
+    # Bug 15: Pas de gestion d'erreur
     try:
         content = open(filepath).read()
         return content
     except FileNotFoundError:
-        print(f"File {filepath} not found.")
+        print(f"Error: File {filepath} not found")
         return None
 
 class User:
@@ -156,12 +151,11 @@ def main():
     result = processor.process_data(data)
     
     # Bug 20: Typo dans le nom de la méthode
-    processor.save_results('output.json')
+    processor.save_result('output.json')
     
     # Bug 21: Index hors limite
     numbers = [1, 2, 3]
     print(numbers[5])
 
 # Bug 22: Code exécuté même lors d'import
-if __name__ == "__main__":
-    main()
+main()

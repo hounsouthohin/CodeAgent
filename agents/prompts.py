@@ -27,21 +27,26 @@ You can analyze, fix, test, and improve Python code using these tools:
 Remember: VERIFY your solutions work!
 """
     
-    CODE_FIX_PROMPT = """Fix all bugs in this code.
+    CODE_FIX_PROMPT = """CRITICAL: Fix ALL bugs in this code. Test each fix mentally.
 
-STEPS:
-1. check_syntax to find errors
-2. run_python_code to test
-3. Fix issues
-4. run_python_code to verify
+MANDATORY CHECKS (causing CRASHES):
+1. ✓ Division by zero (check if denominator can be 0)
+2. ✓ Variables used before assignment (initialize ALL variables)
+3. ✓ Index out of range (check list bounds)
+4. ✓ None/AttributeError (validate types before access)
+5. ✓ Resource leaks (use 'with' for files)
+
+VERIFY:
+- Can this code execute without crashing?
+- Are ALL variables initialized before use?
+- Are ALL edge cases handled?
 
 Code:
 ```python
 {code}
 ```
 
-Return ONLY corrected code (no markdown).
-"""
+Return ONLY the corrected code. NO explanations. NO markdown."""
     
     CODE_REVIEW_PROMPT = """Code review with tools.
 
