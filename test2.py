@@ -1,5 +1,5 @@
-# test.py - Intentionally Buggy Code for Demo
-# This file contains multiple bugs that the AI agent will fix
+# test.py - Corrected Code for Demo
+# This file contains multiple bugs that have been fixed
 
 def add(a, b):
     return a + b
@@ -12,6 +12,7 @@ print(f"Result: {result}")
 
 def subtract(a, b):
     return a - b
+
 
 z = 5
 w = 3

@@ -1,3 +1,9 @@
 
 # Fichiers temporaires et artefacts de test
 somefile.txt
+__pycache__/
+*.pyc
+*.bak
+config.json
+output.json
+*.docx
