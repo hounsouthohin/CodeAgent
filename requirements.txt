@@ -1,39 +1,7 @@
-# FastMCP pour serveur MCP
-fastmcp==0.2.0
-
-# Requêtes HTTP
+fastmcp>=2.13.1
+uvicorn[standard]>=0.30.0
+fastapi>=0.110.0
 requests>=2.31.0
-
-# Variables d'environnement
 python-dotenv>=1.0.0
-
-# Cache disque
 diskcache>=5.6.3
-
-# Logging coloré
-rich>=13.7.0
-
-# Optionnel: Analyse de code Python
-# (décommenter si besoin)
-# radon>=6.0.1
-# pylint>=3.0.0
-# black>=23.12.0
-
-
-# FastMCP pour serveur MCP
-fastmcp==0.2.0
-
-# Serveur ASGI
-uvicorn>=0.27.0
-
-# Requêtes HTTP
-requests>=2.31.0
-
-# Variables d'environnement
-python-dotenv>=1.0.0
-
-# Cache disque
-diskcache>=5.6.3
-
-# Logging coloré
 rich>=13.7.0

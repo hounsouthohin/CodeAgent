@@ -26,6 +26,9 @@ services:
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - OLLAMA_MODEL=qwen2.5-coder:1.5b
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+      - MCP_TRANSPORT=http
     depends_on:
       - ollama
     networks:

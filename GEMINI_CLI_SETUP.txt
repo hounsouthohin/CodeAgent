@@ -1,0 +1,105 @@
+####Alias gemini
+# 1. Crée le dossier et le fichier de profil s’il n’existe pas
+New-Item -Path $PROFILE -ItemType File -Force
+
+# 2. Ajoute l’alias permanent pour que « gemini » marche enfin
+Add-Content -Path $PROFILE -Value 'Set-Alias gemini "$env:APPDATA\npm\gemini.cmd"'
+
+# 3. Recharge le profil dans la session actuelle
+. $PROFILE
+
+
+# Configuration de l'Environnement pour Gemini CLI
+
+Ce document explique comment configurer votre environnement pour utiliser le Gemini CLI avec le projet "Code Assist MCP".
+
+## Prérequis
+
+Avant de commencer, assurez-vous d'avoir les éléments suivants installés :
+
+1.  **Git** : Pour cloner le dépôt du projet.
+2.  **Python (avec uv)** : Pour gérer les dépendances et exécuter le serveur localement.
+3.  **Docker et Docker Compose** (Optionnel, mais recommandé) : Pour exécuter le serveur dans un conteneur.
+4.  **Gemini CLI** : L'interface en ligne de commande de Gemini doit être installée et fonctionnelle.
+
+## Étapes de Configuration
+
+Suivez ces étapes pour configurer votre environnement :
+
+### Étape 1 : Cloner le Dépôt du Projet
+
+Ouvrez votre terminal et clonez le dépôt du projet "Code Assist MCP". Si vous êtes déjà dans le répertoire du projet, cette étape est déjà faite. Sinon, utilisez la commande suivante (remplacez `<url_du_depot>` par l'URL réelle de votre dépôt Git) :
+
+```
+git clone <url_du_depot> .
+```
+
+### Étape 2 : Configurer et Lancer le Serveur MCP
+
+Le projet "Code Assist MCP" doit être en cours d'exécution pour que Gemini CLI puisse interagir avec lui. Vous avez deux options :
+
+#### Option A : Lancer Localement (Recommandé pour le développement)
+
+1.  **Installer les dépendances Python** :
+    Assurez-vous d'être dans le répertoire racine du projet, puis exécutez :
+    ```bash
+    uv pip install -r requirements.txt
+    ```
+
+2.  **Lancer le serveur** :
+    ```bash
+    uv run server.py
+    ```
+    Le serveur sera accessible sur `http://localhost:8080`.
+
+#### Option B : Lancer avec Docker (Recommandé pour un environnement stable)
+
+1.  **Construire et lancer le conteneur Docker** :
+    Assurez-vous d'être dans le répertoire racine du projet, puis exécutez :
+    ```bash
+    docker-compose up --build
+    ```
+    Cela construira l'image Docker et démarrera le conteneur, rendant le serveur accessible sur `http://localhost:8080`.
+
+### Étape 3 : Configurer Gemini CLI
+
+Pour que Gemini CLI puisse communiquer avec votre serveur MCP, vous devez lui indiquer où trouver les outils. Cela se fait en copiant le fichier `settings.json` fourni par le projet dans le répertoire de configuration de Gemini CLI.
+
+1.  **Localisez le fichier `settings.json`** :
+    Ce fichier se trouve généralement à la racine de votre projet "Code Assist MCP".
+
+2.  **Copiez `settings.json`** :
+    Copiez ce fichier dans le répertoire de configuration de votre Gemini CLI. L'emplacement exact peut varier en fonction de votre système d'exploitation et de l'installation de Gemini CLI. Un emplacement courant pourrait être dans un dossier `.gemini` dans votre répertoire utilisateur, ou un chemin similaire.
+
+    *   **Exemple (Linux/macOS)** : `~/.gemini/settings.json`
+    *   **Exemple (Windows)** : `C:\Users\<VotreUtilisateur>\.gemini\settings.json`
+
+    Si vous n'êtes pas sûr de l'emplacement, consultez la documentation de Gemini CLI ou recherchez un fichier `settings.json` existant lié à Gemini.
+
+### Étape 4 : Vérifier la Configuration
+
+Une fois le serveur MCP en cours d'exécution et le fichier `settings.json` copié, vous pouvez vérifier que Gemini CLI reconnaît les outils.
+
+1.  **Ouvrez Gemini CLI**.
+2.  **Exécutez la commande de liste des MCP** :
+    ```
+    /mcp list
+    ```
+    Vous devriez voir une liste des outils exposés par votre serveur MCP (par exemple, `analyze_and_fix`, `expert_review`, `generate_tests`, etc.).
+
+## Dépannage
+
+*   **Erreur de connexion au serveur MCP** :
+    *   Assurez-vous que le serveur MCP est bien en cours d'exécution (voir Étape 2).
+    *   Vérifiez que le port 8080 n'est pas déjà utilisé par une autre application.
+    *   Vérifiez les logs du serveur MCP pour d'éventuelles erreurs.
+
+*   **Gemini CLI ne trouve pas les outils** :
+    *   Assurez-vous que le fichier `settings.json` a été copié au bon endroit dans le répertoire de configuration de Gemini CLI.
+    *   Redémarrez Gemini CLI après avoir copié le fichier `settings.json`.
+
+*   **Problèmes Git** :
+    *   Si vous rencontrez des problèmes lors du clonage, assurez-vous que Git est correctement installé et configuré.
+
+---
+Ceci conclut la documentation pour la configuration de l'environnement.
