@@ -1,35 +1,40 @@
-version: '3.8'
-
 services:
-  code-assist-mcp:
+  # Ollama (LLM local)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - code-agent-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Serveur MCP (2 super-outils)
+  code-agent:
     build: .
+    container_name: code-agent-mcp
     ports:
       - "8080:8080"
     volumes:
       - .:/app
     environment:
-      - PYTHONPATH=/app
       - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=qwen2.5-coder:1.5b
     depends_on:
       - ollama
-    restart: unless-stopped
     networks:
-      - mcp-network
-
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
+      - code-agent-network
     restart: unless-stopped
-    networks:
-      - mcp-network
 
 volumes:
   ollama_data:
-    driver: local
 
 networks:
-  mcp-network:
+  code-agent-network:
     driver: bridge

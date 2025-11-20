@@ -1,19 +1,11 @@
 """
-Outils exposés via MCP pour Gemini CLI.
+Outils exposés à Gemini CLI via MCP.
+Seulement 2 super-outils optimisés.
 """
-from .analyze_fix import analyze_and_fix, analyze_and_fix_advanced
-from .review import expert_review, expert_review_advanced
-from .test_gen import generate_tests, quick_explain, list_files
-from agents.code_verify import CodeVerifier, IterativeFixRunner
+from .intelligent_assist import intelligent_assist
+from .project_context import build_project_context
 
 __all__ = [
-    'analyze_and_fix',
-    'analyze_and_fix_advanced',
-    'expert_review',
-    'expert_review_advanced',
-    'generate_tests',
-    'quick_explain',
-    'list_files',
-    'CodeVerifier',
-    'IterativeFixRunner'
+    'intelligent_assist',
+    'build_project_context',
 ]

@@ -1,230 +1,170 @@
 """
-Agent Ollama avec capacité d'utiliser des outils (ReAct pattern).
+Agent Ollama avec pattern ReAct simplifié.
 """
-import json
 import requests
-from typing import Optional
-
+import json
+from typing import Dict, Optional
 import sys
 sys.path.append('/app')
-from utils.config import Config
-from utils.logger import setup_logger
-from utils.cache import cache_result
-from .tool_executor import ToolExecutor
-from .prompts import PromptTemplates
+from utils import Config, setup_logger, cache_result
 
 logger = setup_logger(__name__)
 
 class OllamaAgent:
-    """Agent Ollama avec ReAct (Reasoning + Acting)."""
+    """Agent qui utilise Ollama avec pattern ReAct."""
     
     def __init__(self):
-        """Initialise l'agent."""
         self.base_url = Config.OLLAMA_BASE_URL
         self.model = Config.OLLAMA_MODEL
-        self.tool_executor = ToolExecutor()
+        self.timeout = Config.OLLAMA_TIMEOUT
+    
+    @cache_result(ttl=3600)
+    def ask_simple(self, prompt: str) -> str:
+        """
+        Requête simple à Ollama sans outils (rapide).
         
-        logger.info(f"OllamaAgent initialized (model: {self.model})")
+        Args:
+            prompt: Prompt à envoyer
+            
+        Returns:
+            Réponse de l'IA
+        """
+        url = f"{self.base_url}/api/generate"
+        
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.1,  # Déterministe pour corrections
+                "num_predict": Config.MAX_TOKENS
+            }
+        }
+        
+        try:
+            logger.info(f"🤖 Asking Ollama (simple): {prompt[:100]}...")
+            
+            response = requests.post(
+                url,
+                json=payload,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            
+            result = response.json()
+            answer = result.get('response', '').strip()
+            
+            logger.info(f"✅ Got response ({len(answer)} chars)")
+            return answer
+            
+        except requests.Timeout:
+            logger.error(f"⏱️ Ollama timeout after {self.timeout}s")
+            return "⏱️ Timeout: Requête trop longue"
+        except Exception as e:
+            logger.error(f"❌ Ollama error: {e}")
+            return f"❌ Error: {str(e)}"
     
     def ask_with_tools(
         self,
         prompt: str,
-        task_type: str = "general",
-        max_iterations: int = None
+        tools: Optional[list] = None,
+        max_iterations: int = 5
     ) -> str:
         """
-        Pose une question à Ollama avec possibilité d'utiliser des outils.
+        Requête avec outils disponibles (pattern ReAct).
         
         Args:
-            prompt: Question/tâche à accomplir
-            task_type: Type de tâche (general, fix, review, test, debug)
-            max_iterations: Nombre max d'itérations tool (default: Config.MAX_TOOL_ITERATIONS)
+            prompt: Prompt initial
+            tools: Liste des outils disponibles (optionnel)
+            max_iterations: Nombre max d'itérations ReAct
             
         Returns:
-            Réponse finale
+            Réponse finale après utilisation des outils
         """
-        if max_iterations is None:
-            max_iterations = Config.MAX_TOOL_ITERATIONS
+        if tools is None:
+            # Importer les outils par défaut
+            from tools import AVAILABLE_TOOLS
+            tools = [t.get_tool_definition() for t in AVAILABLE_TOOLS]
         
-        # Créer le prompt système avec les outils
-        tools = self.tool_executor.get_tools_definitions()
-        system_prompt = PromptTemplates.create_system_prompt(tools, task_type)
+        logger.info(f"🤖 Starting ReAct loop ({len(tools)} tools available)")
         
-        # Combiner système + user prompt
+        # Construire le prompt système avec les outils
+        system_prompt = self._build_system_prompt(tools)
         full_prompt = f"{system_prompt}\n\n{prompt}"
         
-        # Boucle ReAct
         conversation_history = []
         iteration = 0
         
         while iteration < max_iterations:
             iteration += 1
-            logger.info(f"ReAct iteration {iteration}/{max_iterations}")
+            logger.info(f"   ReAct iteration {iteration}/{max_iterations}")
             
-            # Obtenir la réponse d'Ollama
-            if conversation_history:
-                # Utiliser l'historique pour le contexte
-                current_prompt = conversation_history[-1]
-            else:
-                current_prompt = full_prompt
+            # Demander à Ollama
+            response = self.ask_simple(full_prompt)
+            conversation_history.append(response)
             
-            ollama_response = self._call_ollama(current_prompt)
-            
-            # Vérifier si Ollama veut utiliser un outil
-            if self.tool_executor.is_tool_call(ollama_response):
-                # Parser l'appel d'outil
-                tool_name, parameters = self.tool_executor.parse_tool_call(ollama_response)
-                
-                if tool_name is None:
-                    # Parsing échoué, retourner la réponse telle quelle
-                    logger.warning("Failed to parse tool call, returning response as-is")
-                    return ollama_response
-                
-                # Exécuter l'outil
-                logger.info(f"Tool requested: {tool_name}")
-                tool_result = self.tool_executor.execute_tool(tool_name, parameters)
+            # Vérifier si Ollama veut appeler un outil
+            if "TOOL_CALL:" in response:
+                # Extraire et exécuter l'appel d'outil
+                tool_result = self._execute_tool_call(response, tools)
                 
                 # Ajouter le résultat à l'historique
-                feedback = f"Tool '{tool_name}' returned:\n{tool_result}\n\nNow provide your response based on this information."
-                conversation_history.append(feedback)
-                
+                full_prompt = f"{full_prompt}\n\nTool result: {tool_result}\n\nContinue:"
+                conversation_history.append(f"Tool result: {tool_result}")
             else:
-                # Pas d'appel d'outil, c'est la réponse finale
-                logger.info("Final answer received")
-                return ollama_response
+                # Pas d'appel d'outil = réponse finale
+                logger.info(f"✅ ReAct completed in {iteration} iterations")
+                return response
         
-        # Max iterations atteintes
-        logger.warning(f"Max iterations ({max_iterations}) reached")
-        return ollama_response if ollama_response else "❌ Max iterations reached without final answer"
+        logger.warning(f"⚠️ Max iterations reached ({max_iterations})")
+        return conversation_history[-1] if conversation_history else "No response"
     
-    @cache_result(ttl=3600)
-    def ask_simple(self, prompt: str, max_tokens: int = None, timeout: int = None) -> str:
-        """
-        Appel simple à Ollama sans outils (avec cache).
+    def _build_system_prompt(self, tools: list) -> str:
+        """Construit le prompt système avec les outils."""
+        tools_desc = "\n".join([
+            f"- {tool['name']}: {tool['description']}"
+            for tool in tools
+        ])
         
-        Args:
-            prompt: Prompt à envoyer
-            max_tokens: Nombre max de tokens
-            timeout: Timeout en secondes
-            
-        Returns:
-            Réponse d'Ollama
-        """
-        if max_tokens is None:
-            max_tokens = Config.MAX_TOKENS
-        if timeout is None:
-            timeout = Config.OLLAMA_TIMEOUT
-        
-        return self._call_ollama(prompt, max_tokens, timeout, stream=True)
+        return f"""You are an AI coding assistant with access to tools.
+
+AVAILABLE TOOLS:
+{tools_desc}
+
+TO USE A TOOL:
+TOOL_CALL: {{"name": "tool_name", "parameters": {{"param": "value"}}}}
+
+Think step-by-step and use tools when needed."""
     
-    def _call_ollama(
-        self,
-        prompt: str,
-        max_tokens: int = None,
-        timeout: int = None,
-        stream: bool = False
-    ) -> str:
-        """
-        Appel bas-niveau à l'API Ollama.
-        
-        Args:
-            prompt: Prompt à envoyer
-            max_tokens: Nombre max de tokens
-            timeout: Timeout
-            stream: Utiliser le streaming
-            
-        Returns:
-            Réponse d'Ollama
-        """
-        if max_tokens is None:
-            max_tokens = Config.MAX_TOKENS
-        if timeout is None:
-            timeout = Config.OLLAMA_TIMEOUT
-        
+    def _execute_tool_call(self, response: str, tools: list) -> str:
+        """Extrait et exécute un appel d'outil depuis la réponse."""
         try:
-            # Vérifier qu'Ollama est accessible
-            health_check = requests.get(
-                f"{self.base_url}/api/tags",
-                timeout=5
-            )
-            health_check.raise_for_status()
+            # Extraire le JSON après TOOL_CALL:
+            tool_call_start = response.find("TOOL_CALL:")
+            if tool_call_start == -1:
+                return "Error: No TOOL_CALL found"
             
-            # Faire la requête
-            url = f"{self.base_url}/api/generate"
+            json_start = response.find("{", tool_call_start)
+            json_end = response.find("}", json_start) + 1
             
-            if stream:
-                return self._call_ollama_stream(url, prompt, max_tokens, timeout)
-            else:
-                return self._call_ollama_simple(url, prompt, max_tokens, timeout)
-                
-        except requests.exceptions.ConnectionError:
-            error_msg = f"❌ Cannot connect to Ollama at {self.base_url}"
-            logger.error(error_msg)
-            return error_msg
-        except requests.exceptions.Timeout:
-            error_msg = f"⏱️ Ollama request timed out after {timeout}s"
-            logger.error(error_msg)
-            return error_msg
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 404:
-                error_msg = f"❌ Model '{self.model}' not found. Install: docker-compose exec ollama ollama pull {self.model}"
-            else:
-                error_msg = f"❌ HTTP {e.response.status_code}: {e}"
-            logger.error(error_msg)
-            return error_msg
+            if json_start == -1 or json_end == 0:
+                return "Error: Invalid TOOL_CALL format"
+            
+            tool_call_json = response[json_start:json_end]
+            tool_call = json.loads(tool_call_json)
+            
+            tool_name = tool_call.get('name')
+            parameters = tool_call.get('parameters', {})
+            
+            logger.info(f"   🔧 Calling tool: {tool_name}")
+            
+            # Exécuter l'outil
+            from agents.tool_executor import ToolExecutor
+            executor = ToolExecutor()
+            result = executor.execute_tool(tool_name, parameters)
+            
+            return result
+            
         except Exception as e:
-            error_msg = f"❌ Unexpected error: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            return error_msg
-    
-    def _call_ollama_stream(self, url: str, prompt: str, max_tokens: int, timeout: int) -> str:
-        """Appel avec streaming."""
-        response = requests.post(
-            url,
-            json={
-                "model": self.model,
-                "prompt": prompt,
-                "stream": True,
-                "options": {
-                    "temperature": 0.2,
-                    "num_predict": max_tokens,
-                    "top_p": 0.9
-                }
-            },
-            stream=True,
-            timeout=timeout
-        )
-        response.raise_for_status()
-        
-        # Collecter la réponse en streaming
-        full_response = ""
-        for line in response.iter_lines():
-            if line:
-                try:
-                    chunk = json.loads(line)
-                    full_response += chunk.get("response", "")
-                    if chunk.get("done", False):
-                        break
-                except json.JSONDecodeError:
-                    continue
-        
-        return full_response.strip() or "Pas de réponse générée"
-    
-    def _call_ollama_simple(self, url: str, prompt: str, max_tokens: int, timeout: int) -> str:
-        """Appel simple sans streaming."""
-        response = requests.post(
-            url,
-            json={
-                "model": self.model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.2,
-                    "num_predict": max_tokens
-                }
-            },
-            timeout=timeout
-        )
-        response.raise_for_status()
-        
-        return response.json().get("response", "Pas de réponse générée")
+            logger.error(f"   ❌ Tool execution error: {e}")
+            return f"Error executing tool: {str(e)}"

@@ -1,5 +1,5 @@
 """
-Utilitaires pour l'application.
+Utilitaires (config, logging, cache).
 """
 from .config import Config
 from .logger import setup_logger
